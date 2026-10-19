@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { Lock, User, ArrowRight, ShieldCheck, Zap } from 'lucide-react';
+import { Lock, User, ArrowRight, Zap } from 'lucide-react';
 
 export default function Login() {
   const { login, settings } = useAuth();
@@ -26,11 +26,6 @@ export default function Login() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const fillDemo = (u, p) => {
-    setUsername(u);
-    setPassword(p);
   };
 
   return (
@@ -109,48 +104,6 @@ export default function Login() {
               )}
             </button>
           </form>
-
-          {/* Quick Demo Credentials */}
-          <div className="mt-8 pt-6 border-t border-slate-100">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2.5 flex items-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5 text-sky-500" />
-              Quick Demo Logins
-            </p>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => fillDemo('admin', 'admin123')}
-                className="p-2.5 text-left rounded-lg bg-slate-50 hover:bg-sky-50 hover:border-sky-200 border border-slate-200 transition-all"
-              >
-                <p className="font-semibold text-slate-800">Admin</p>
-                <p className="text-[10px] text-slate-500">admin / admin123</p>
-              </button>
-              <button
-                type="button"
-                onClick={() => fillDemo('manager', 'manager123')}
-                className="p-2.5 text-left rounded-lg bg-slate-50 hover:bg-sky-50 hover:border-sky-200 border border-slate-200 transition-all"
-              >
-                <p className="font-semibold text-slate-800">Manager</p>
-                <p className="text-[10px] text-slate-500">manager / manager123</p>
-              </button>
-              <button
-                type="button"
-                onClick={() => fillDemo('tech_ali', 'password123')}
-                className="p-2.5 text-left rounded-lg bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 border border-slate-200 transition-all"
-              >
-                <p className="font-semibold text-emerald-800">Technician (Ali)</p>
-                <p className="text-[10px] text-slate-500">tech_ali / password123</p>
-              </button>
-              <button
-                type="button"
-                onClick={() => fillDemo('billing_sara', 'password123')}
-                className="p-2.5 text-left rounded-lg bg-slate-50 hover:bg-purple-50 hover:border-purple-200 border border-slate-200 transition-all"
-              >
-                <p className="font-semibold text-purple-800">Billing Clerk (Sara)</p>
-                <p className="text-[10px] text-slate-500">billing_sara / password123</p>
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>

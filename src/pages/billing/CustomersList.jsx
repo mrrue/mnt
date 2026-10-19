@@ -13,7 +13,10 @@ import {
   MapPin,
   Package,
   Download,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Upload,
+  CheckCircle,
+  AlertCircle
 } from 'lucide-react';
 import Badge from '../../components/common/Badge';
 import Modal from '../../components/common/Modal';
@@ -41,6 +44,10 @@ export default function CustomersList() {
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(searchParams.get('action') === 'new');
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importFile, setImportFile] = useState(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
   const [selectedCustomerForPay, setSelectedCustomerForPay] = useState(null);
   const [receiptModalData, setReceiptModalData] = useState(null);
 
@@ -197,6 +204,29 @@ export default function CustomersList() {
     exportToCSV(exportData, 'isp_customers_list');
   };
 
+  const handleImportSubmit = async (e) => {
+    e.preventDefault();
+    if (!importFile) {
+      alert('Please select an Excel (.xlsx/.xls) or CSV file.');
+      return;
+    }
+
+    setIsImporting(true);
+    setImportResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', importFile);
+
+      const res = await api.post('/customers/import', formData);
+      setImportResult(res);
+      fetchCustomers(1);
+    } catch (err) {
+      alert(err.message || 'Failed to import customers from file.');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   return (
     <div className="space-y-5">
       {/* Header & Actions */}
@@ -217,6 +247,18 @@ export default function CustomersList() {
           >
             <Download className="w-3.5 h-3.5" /> Export CSV
           </button>
+          {hasPermission('customer_manage') && (
+            <button
+              onClick={() => {
+                setIsImportModalOpen(true);
+                setImportFile(null);
+                setImportResult(null);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold rounded-xl border border-emerald-200 transition-colors"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" /> Import Excel
+            </button>
+          )}
           {hasPermission('customer_manage') && (
             <button
               onClick={() => setIsAddModalOpen(true)}
@@ -637,6 +679,107 @@ export default function CustomersList() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* BULK EXCEL IMPORT MODAL */}
+      <Modal
+        isOpen={isImportModalOpen}
+        onClose={() => {
+          setIsImportModalOpen(false);
+          setImportFile(null);
+          setImportResult(null);
+        }}
+        title="Bulk Import Customers from Excel / CSV"
+        maxWidth="max-w-xl"
+      >
+        <div className="space-y-4 text-xs">
+          {/* Instructions and Download Template Link */}
+          <div className="p-3.5 bg-sky-50/70 border border-sky-200 rounded-xl space-y-2">
+            <p className="font-bold text-sky-900 flex items-center gap-1.5">
+              <FileSpreadsheet className="w-4 h-4 text-sky-600" /> Excel Template Format
+            </p>
+            <p className="text-slate-600 leading-relaxed">
+              Upload an Excel (.xlsx/.xls) or CSV sheet containing your customer records. Columns like <strong>Name</strong> and <strong>Phone</strong> are required. Customer IDs will be generated automatically.
+            </p>
+            <div className="pt-1">
+              <a
+                href="/api/customers/import-template"
+                download="customers_bulk_template.xlsx"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white text-sky-700 hover:text-sky-800 font-semibold rounded-lg border border-sky-200 shadow-xs hover:bg-sky-50 transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" /> Download Sample Excel Template (.xlsx)
+              </a>
+            </div>
+          </div>
+
+          {/* Import Result Feedback */}
+          {importResult && (
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2">
+              <div className="flex items-center gap-2 text-emerald-800 font-bold">
+                <CheckCircle className="w-5 h-5 text-emerald-600" />
+                <span>{importResult.message || `Successfully imported ${importResult.importedCount} customers!`}</span>
+              </div>
+              {importResult.errors && importResult.errors.length > 0 && (
+                <div className="mt-2 p-2 bg-white/80 rounded-lg text-slate-700 space-y-1 max-h-32 overflow-y-auto">
+                  <p className="font-semibold text-rose-600">Warnings / Skipped Rows:</p>
+                  {importResult.errors.map((err, i) => (
+                    <p key={i} className="text-[11px] text-slate-600">• {err}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Upload Form */}
+          <form onSubmit={handleImportSubmit} className="space-y-4">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-2">Select Spreadsheet File</label>
+              <label className="border-2 border-dashed border-slate-300 hover:border-sky-500 rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer bg-slate-50 hover:bg-sky-50/50 transition-all">
+                <Upload className="w-8 h-8 text-sky-600 mb-2" />
+                <span className="font-semibold text-slate-800">
+                  {importFile ? importFile.name : "Click to browse or drop Excel file here"}
+                </span>
+                <span className="text-[11px] text-slate-400 mt-1">
+                  Supports .xlsx, .xls, and .csv files (up to 25MB)
+                </span>
+                <input
+                  type="file"
+                  accept=".xlsx, .xls, .csv"
+                  onChange={(e) => setImportFile(e.target.files[0] || null)}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsImportModalOpen(false);
+                  setImportFile(null);
+                  setImportResult(null);
+                }}
+                className="px-4 py-2 bg-slate-100 text-slate-700 font-semibold rounded-xl hover:bg-slate-200"
+              >
+                {importResult ? 'Close' : 'Cancel'}
+              </button>
+              <button
+                type="submit"
+                disabled={isImporting || !importFile}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+              >
+                {isImporting ? (
+                  <span>Importing Customers...</span>
+                ) : (
+                  <>
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span>Upload & Import Now</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
       </Modal>
 
       {/* RECEIPT MODAL */}

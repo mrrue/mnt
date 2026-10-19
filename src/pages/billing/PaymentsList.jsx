@@ -12,7 +12,8 @@ import {
   Download,
   Calendar,
   DollarSign,
-  Smartphone
+  Smartphone,
+  Trash2
 } from 'lucide-react';
 import Badge from '../../components/common/Badge';
 import Modal from '../../components/common/Modal';
@@ -124,6 +125,16 @@ export default function PaymentsList() {
       fetchPayments(pagination.page);
     } catch (err) {
       alert(err.message || 'Failed to void payment.');
+    }
+  };
+
+  const handleDeletePayment = async (paymentId, receiptNo) => {
+    if (!window.confirm(`Are you sure you want to permanently delete payment record ${receiptNo || ''}? If it was not voided, the customer's balance will be adjusted back.`)) return;
+    try {
+      await api.delete(`/payments/${paymentId}`);
+      fetchPayments(pagination.page);
+    } catch (err) {
+      alert(err.message || 'Failed to delete payment.');
     }
   };
 
@@ -325,10 +336,19 @@ export default function PaymentsList() {
                               setSelectedPaymentForVoid(p);
                               setIsVoidModalOpen(true);
                             }}
-                            className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg border border-rose-200 transition-colors"
+                            className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg border border-amber-200 transition-colors"
                             title="Void Payment"
                           >
                             <Ban className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {hasPermission('payment_void') && (
+                          <button
+                            onClick={() => handleDeletePayment(p.id, p.receipt_number)}
+                            className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg border border-rose-200 transition-colors"
+                            title="Permanently Delete Payment Record"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         )}
                       </div>

@@ -12,16 +12,19 @@ import {
   Clock,
   Send,
   Paperclip,
-  PhoneCall,
   CheckCircle,
   Wrench,
   Camera,
   History,
   Image as ImageIcon,
-  AlertCircle
+  AlertCircle,
+  Mic,
+  Square,
+  Trash2,
+  Save,
+  Check
 } from 'lucide-react';
 import Badge from '../../components/common/Badge';
-import CallButton from '../../components/common/CallButton';
 import Modal from '../../components/common/Modal';
 
 export default function TicketDetail() {
@@ -44,8 +47,16 @@ export default function TicketDetail() {
   const fileInputRef = useRef(null);
   const chatBottomRef = useRef(null);
 
-  // Worklog Form State
-  const [isWorklogModalOpen, setIsWorklogModalOpen] = useState(false);
+  // Voice Note Recording State
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recordingTimerRef = useRef(null);
+
+  // Worklog Form State (Embedded inline, auto-saved)
+  const [isSavingWorklog, setIsSavingWorklog] = useState(false);
+  const [worklogSavedAlert, setWorklogSavedAlert] = useState(false);
   const [worklogData, setWorklogData] = useState({
     arrival_time: '',
     departure_time: '',
@@ -185,13 +196,27 @@ export default function TicketDetail() {
   };
 
   const handleSaveWorklog = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
+    setIsSavingWorklog(true);
     try {
       await api.post(`/tickets/${id}/worklog`, worklogData);
-      setIsWorklogModalOpen(false);
+      setWorklogSavedAlert(true);
+      setTimeout(() => setWorklogSavedAlert(false), 3000);
       fetchTicketDetails();
     } catch (err) {
       alert('Failed to save work log.');
+    } finally {
+      setIsSavingWorklog(false);
+    }
+  };
+
+  const handleDeleteTicket = async () => {
+    if (!window.confirm(`Are you sure you want to permanently delete ticket ${ticket.ticket_number}? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/tickets/${id}`);
+      navigate('/helpdesk/tickets');
+    } catch (err) {
+      alert(err.message || 'Failed to delete ticket.');
     }
   };
 
@@ -214,19 +239,81 @@ export default function TicketDetail() {
     }
   };
 
-  const startVoiceCall = () => {
-    const targetId = ticket.assigned_to === user.id ? ticket.created_by : ticket.assigned_to;
-    if (!targetId) {
-      alert('No assigned technician or manager available to call on this ticket.');
-      return;
-    }
+  // Voice Note Recording Functions
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
 
-    setActiveCall({
-      isIncoming: false,
-      ticket_id: ticket.id,
-      target_user_id: targetId,
-      target_user_name: ticket.assigned_to === user.id ? ticket.created_by_name : ticket.technician_name
-    });
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (err) {
+      alert('Microphone access denied or not available. Please allow microphone permissions.');
+    }
+  };
+
+  const cancelRecording = () => {
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    audioChunksRef.current = [];
+    setIsRecording(false);
+    setRecordingTime(0);
+  };
+
+  const sendVoiceNote = () => {
+    if (!mediaRecorderRef.current || !isRecording) return;
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+
+    mediaRecorderRef.current.onstop = async () => {
+      try {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const audioFile = new File([audioBlob], `voice_note_${Date.now()}.webm`, { type: 'audio/webm' });
+
+        const formData = new FormData();
+        formData.append('message', '🎤 Voice Message');
+        formData.append('attachment', audioFile);
+
+        const res = await api.post(`/tickets/${id}/messages`, formData);
+
+        sendWebSocketMessage({
+          type: 'ticket_message',
+          ticket_id: ticket.id,
+          message: '🎤 Voice Message',
+          attachment_url: res.attachment_url,
+          attachment_name: audioFile.name
+        });
+
+        fetchTicketDetails();
+        scrollToBottom();
+      } catch (err) {
+        alert('Failed to send voice message.');
+      } finally {
+        audioChunksRef.current = [];
+        setIsRecording(false);
+        setRecordingTime(0);
+      }
+    };
+
+    mediaRecorderRef.current.stop();
   };
 
   if (loading || !ticket) {
@@ -259,22 +346,15 @@ export default function TicketDetail() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* In-ticket Voice Call Button */}
-          <button
-            onClick={startVoiceCall}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors"
-            title="Start Browser Voice Call"
-          >
-            <PhoneCall className="w-3.5 h-3.5" /> Voice Call
-          </button>
-
-          {/* Record Work Log Button */}
-          <button
-            onClick={() => setIsWorklogModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors"
-          >
-            <Wrench className="w-3.5 h-3.5" /> Record Work Log
-          </button>
+          {hasPermission('helpdesk_view') && (
+            <button
+              onClick={handleDeleteTicket}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-semibold rounded-xl border border-rose-200 transition-colors"
+              title="Delete this ticket"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Delete Ticket
+            </button>
+          )}
         </div>
       </div>
 
@@ -289,7 +369,6 @@ export default function TicketDetail() {
                 <h3 className="text-base font-bold text-slate-900 mt-0.5">{ticket.customer_name}</h3>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="text-xs font-semibold text-slate-700">{ticket.customer_phone}</span>
-                  <CallButton phone={ticket.customer_phone} size="xs" label="" />
                 </div>
                 <p className="text-xs text-slate-500 mt-1">{ticket.customer_address}</p>
               </div>
@@ -313,32 +392,97 @@ export default function TicketDetail() {
               </div>
             </div>
 
-            {/* Work Log Summary if completed/recorded */}
-            {(ticket.work_performed || ticket.resolution) && (
-              <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs space-y-1.5">
-                <p className="font-bold text-emerald-900 text-sm flex items-center gap-1.5">
-                  <CheckCircle className="w-4 h-4 text-emerald-600" /> Resolution & Work Log
+            {/* Embedded Work Log & Resolution - Auto-saved */}
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-200">
+                <p className="font-bold text-slate-900 text-sm flex items-center gap-1.5">
+                  <Wrench className="w-4 h-4 text-sky-600" /> Technician Work Log & Completion
                 </p>
-                {ticket.technician_name && (
-                  <p className="text-emerald-800"><span className="font-semibold">Technician:</span> {ticket.technician_name}</p>
-                )}
-                {ticket.arrival_time && (
-                  <p className="text-emerald-800"><span className="font-semibold">Visit Time:</span> {ticket.arrival_time} to {ticket.departure_time}</p>
-                )}
-                {ticket.fault_found && (
-                  <p className="text-emerald-800"><span className="font-semibold">Fault Found:</span> {ticket.fault_found}</p>
-                )}
-                {ticket.work_performed && (
-                  <p className="text-emerald-800"><span className="font-semibold">Work Performed:</span> {ticket.work_performed}</p>
-                )}
-                {ticket.parts_used && (
-                  <p className="text-emerald-800"><span className="font-semibold">Materials/Parts:</span> {ticket.parts_used}</p>
-                )}
-                {ticket.resolution && (
-                  <p className="text-emerald-900 font-semibold"><span className="font-bold">Final Resolution:</span> {ticket.resolution}</p>
-                )}
+                <div className="flex items-center gap-2">
+                  {worklogSavedAlert && (
+                    <span className="text-[11px] font-semibold text-emerald-600 flex items-center gap-1 bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-200">
+                      <Check className="w-3.5 h-3.5" /> Saved to Ticket
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleSaveWorklog}
+                    disabled={isSavingWorklog}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-xs shadow-xs transition-colors"
+                  >
+                    <Save className="w-3.5 h-3.5" /> {isSavingWorklog ? 'Saving...' : 'Save Work Log'}
+                  </button>
+                </div>
               </div>
-            )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Arrival Time</label>
+                  <input
+                    type="text"
+                    value={worklogData.arrival_time}
+                    onChange={(e) => setWorklogData({ ...worklogData, arrival_time: e.target.value })}
+                    placeholder="e.g. 11:30 AM"
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Departure Time</label>
+                  <input
+                    type="text"
+                    value={worklogData.departure_time}
+                    onChange={(e) => setWorklogData({ ...worklogData, departure_time: e.target.value })}
+                    placeholder="e.g. 12:45 PM"
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Fault Found</label>
+                <input
+                  type="text"
+                  value={worklogData.fault_found}
+                  onChange={(e) => setWorklogData({ ...worklogData, fault_found: e.target.value })}
+                  placeholder="e.g. Core fiber cable cut outside gate, connector broken"
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Work Performed</label>
+                <textarea
+                  rows="2"
+                  value={worklogData.work_performed}
+                  onChange={(e) => setWorklogData({ ...worklogData, work_performed: e.target.value })}
+                  placeholder="e.g. Respliced fiber core with fusion splicer, tested optical power (-19.2 dBm)"
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Parts / Materials Used</label>
+                  <input
+                    type="text"
+                    value={worklogData.parts_used}
+                    onChange={(e) => setWorklogData({ ...worklogData, parts_used: e.target.value })}
+                    placeholder="e.g. 1 SC-APC Fast Connector, 20m drop wire"
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Final Resolution Details</label>
+                  <input
+                    type="text"
+                    value={worklogData.resolution}
+                    onChange={(e) => setWorklogData({ ...worklogData, resolution: e.target.value })}
+                    placeholder="e.g. Internet restored, speed verified"
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 font-medium"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Photo & File Attachments */}
@@ -418,9 +562,16 @@ export default function TicketDetail() {
                         {m.message && <p className="whitespace-pre-line">{m.message}</p>}
                         {m.attachment_url && (
                           <div className="mt-2">
-                            <a href={m.attachment_url} target="_blank" rel="noreferrer" className="underline font-semibold text-[11px] flex items-center gap-1">
-                              <Paperclip className="w-3 h-3" /> {m.attachment_name || 'View Attachment'}
-                            </a>
+                            {m.attachment_url.match(/\.(webm|mp3|wav|ogg|m4a|aac)$/i) || m.attachment_name?.includes('voice_note') ? (
+                              <div className="bg-black/10 rounded-xl p-2 flex flex-col gap-1">
+                                <audio controls src={m.attachment_url} className="w-full max-w-[220px] sm:max-w-xs h-8" />
+                                <span className="text-[9px] opacity-75 font-mono">{m.attachment_name || 'voice_message.webm'}</span>
+                              </div>
+                            ) : (
+                              <a href={m.attachment_url} target="_blank" rel="noreferrer" className="underline font-semibold text-[11px] flex items-center gap-1">
+                                <Paperclip className="w-3 h-3" /> {m.attachment_name || 'View Attachment'}
+                              </a>
+                            )}
                           </div>
                         )}
                       </div>
@@ -431,33 +582,69 @@ export default function TicketDetail() {
               <div ref={chatBottomRef} />
             </div>
 
-            {/* Chat Input Bar */}
-            <form onSubmit={handleSendMessage} className="p-3 border-t border-slate-200 bg-white flex items-center gap-2">
-              <label className="p-2 text-slate-400 hover:text-slate-600 cursor-pointer rounded-lg hover:bg-slate-100">
-                <Paperclip className="w-4 h-4" />
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={(e) => setChatFile(e.target.files[0] || null)}
-                  className="hidden"
-                />
-              </label>
+            {/* Chat Input Bar with Voice Note support */}
+            <div className="p-3 border-t border-slate-200 bg-white">
+              {isRecording ? (
+                <div className="flex items-center justify-between px-3 py-2 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-semibold">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-ping" />
+                    <span>Recording Voice Message... {Math.floor(recordingTime / 60)}:{String(recordingTime % 60).padStart(2, '0')}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={cancelRecording}
+                      className="px-2.5 py-1 text-slate-600 hover:text-slate-900 bg-white rounded-lg border border-slate-200 text-xs font-medium"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={sendVoiceNote}
+                      className="inline-flex items-center gap-1 px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold shadow-xs"
+                    >
+                      <Send className="w-3.5 h-3.5" /> Send Voice
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+                  <label className="p-2 text-slate-400 hover:text-slate-600 cursor-pointer rounded-lg hover:bg-slate-100" title="Attach file or photo">
+                    <Paperclip className="w-4 h-4" />
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={(e) => setChatFile(e.target.files[0] || null)}
+                      className="hidden"
+                    />
+                  </label>
 
-              <input
-                type="text"
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                placeholder={chatFile ? `File attached: ${chatFile.name}` : "Type message or update..."}
-                className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-              />
+                  <button
+                    type="button"
+                    onClick={startRecording}
+                    className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                    title="Record voice message"
+                  >
+                    <Mic className="w-4 h-4" />
+                  </button>
 
-              <button
-                type="submit"
-                className="p-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl shadow-xs transition-colors"
-              >
-                <Send className="w-4 h-4" />
-              </button>
-            </form>
+                  <input
+                    type="text"
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    placeholder={chatFile ? `File attached: ${chatFile.name}` : "Type message or record voice note..."}
+                    className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+
+                  <button
+                    type="submit"
+                    className="p-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl shadow-xs transition-colors"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </form>
+              )}
+            </div>
           </div>
         </div>
 
@@ -497,10 +684,7 @@ export default function TicketDetail() {
             {ticket.technician_phone && (
               <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
                 <span className="text-slate-500">Tech Contact:</span>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-semibold text-slate-800">{ticket.technician_phone}</span>
-                  <CallButton phone={ticket.technician_phone} size="xs" label="" />
-                </div>
+                <span className="font-semibold text-slate-800">{ticket.technician_phone}</span>
               </div>
             )}
           </div>
@@ -535,113 +719,6 @@ export default function TicketDetail() {
           </div>
         </div>
       </div>
-
-      {/* RECORD WORK LOG MODAL */}
-      <Modal
-        isOpen={isWorklogModalOpen}
-        onClose={() => setIsWorklogModalOpen(false)}
-        title="Record Technician Work Log & Completion"
-        maxWidth="max-w-xl"
-      >
-        <form onSubmit={handleSaveWorklog} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Arrival Time</label>
-              <input
-                type="text"
-                value={worklogData.arrival_time}
-                onChange={(e) => setWorklogData({ ...worklogData, arrival_time: e.target.value })}
-                placeholder="e.g. 11:30 AM"
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Departure Time</label>
-              <input
-                type="text"
-                value={worklogData.departure_time}
-                onChange={(e) => setWorklogData({ ...worklogData, departure_time: e.target.value })}
-                placeholder="e.g. 12:45 PM"
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Fault Found</label>
-            <input
-              type="text"
-              value={worklogData.fault_found}
-              onChange={(e) => setWorklogData({ ...worklogData, fault_found: e.target.value })}
-              placeholder="e.g. Core fiber cable cut outside gate, connector broken"
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Work Performed</label>
-            <textarea
-              rows="2"
-              value={worklogData.work_performed}
-              onChange={(e) => setWorklogData({ ...worklogData, work_performed: e.target.value })}
-              placeholder="e.g. Respliced fiber core with fusion splicer, tested optical power (-19.2 dBm)"
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Parts / Materials Used</label>
-            <input
-              type="text"
-              value={worklogData.parts_used}
-              onChange={(e) => setWorklogData({ ...worklogData, parts_used: e.target.value })}
-              placeholder="e.g. 1 SC-APC Fast Connector, 20m drop wire"
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Final Resolution Details</label>
-            <input
-              type="text"
-              value={worklogData.resolution}
-              onChange={(e) => setWorklogData({ ...worklogData, resolution: e.target.value })}
-              placeholder="e.g. Internet and optical power restored, verified speed at 20Mbps"
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Update Ticket Status</label>
-            <select
-              value={worklogData.status}
-              onChange={(e) => setWorklogData({ ...worklogData, status: e.target.value })}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-bold"
-            >
-              <option value="Resolved">Resolved</option>
-              <option value="Completed">Completed</option>
-              <option value="In Progress">In Progress</option>
-              <option value="Waiting for Parts">Waiting for Parts</option>
-            </select>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => setIsWorklogModalOpen(false)}
-              className="px-4 py-2 bg-slate-100 text-slate-700 text-xs font-semibold rounded-xl"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-xs"
-            >
-              Save Work Log
-            </button>
-          </div>
-        </form>
-      </Modal>
     </div>
   );
 }

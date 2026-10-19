@@ -502,4 +502,39 @@ router.post('/:id/attachments', authenticateToken, upload.array('files', 10), (r
   }
 });
 
+// DELETE /api/tickets/:id - Delete ticket and associated messages/attachments
+router.delete('/:id', authenticateToken, (req, res) => {
+  try {
+    const isAllowed = req.user.role === 'admin' || req.user.role === 'manager' || (req.user.permissions && req.user.permissions.includes('helpdesk_manage'));
+    if (!isAllowed) {
+      return res.status(403).json({ error: 'Access denied. You do not have permission to delete tickets.' });
+    }
+
+    const ticket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(req.params.id);
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found.' });
+    }
+
+    // Delete ticket in transaction (ON DELETE CASCADE handles messages and attachments)
+    const deleteTx = db.transaction(() => {
+      db.prepare('DELETE FROM ticket_messages WHERE ticket_id = ?').run(ticket.id);
+      db.prepare('DELETE FROM ticket_attachments WHERE ticket_id = ?').run(ticket.id);
+      db.prepare('DELETE FROM tickets WHERE id = ?').run(ticket.id);
+    });
+
+    deleteTx();
+
+    logAudit(req.user.id, req.user.full_name, 'TICKET_DELETE', 'tickets', ticket.id, {
+      ticket_number: ticket.ticket_number,
+      customer_name: ticket.customer_name,
+      category: ticket.category
+    }, req.ip);
+
+    res.json({ message: 'Ticket deleted successfully.' });
+  } catch (err) {
+    console.error('Delete ticket error:', err);
+    res.status(500).json({ error: 'Failed to delete ticket.' });
+  }
+});
+
 module.exports = router;

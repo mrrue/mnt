@@ -19,13 +19,13 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  // Allow images, pdfs, docs, text
-  const allowedExtensions = /jpeg|jpg|png|webp|gif|pdf|doc|docx|txt|csv|xlsx|xls/;
+  // Allow images, pdfs, docs, text, audio recordings, spreadsheets
+  const allowedExtensions = /jpeg|jpg|png|webp|gif|pdf|doc|docx|txt|csv|xlsx|xls|webm|mp3|wav|ogg|m4a|aac|opus/;
   const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
-  if (allowedExtensions.test(ext)) {
+  if (allowedExtensions.test(ext) || file.mimetype?.startsWith('audio/')) {
     cb(null, true);
   } else {
-    cb(new Error('Only images, PDFs, and office documents are allowed.'));
+    cb(new Error('Only images, PDFs, audio recordings, and office documents are allowed.'));
   }
 };
 

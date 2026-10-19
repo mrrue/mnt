@@ -169,6 +169,26 @@ export default function CustomerDetail() {
     }
   };
 
+  const handleDeletePayment = async (paymentId, receiptNo) => {
+    if (!window.confirm(`Are you sure you want to permanently delete payment record ${receiptNo || ''}? Balance will be readjusted.`)) return;
+    try {
+      await api.delete(`/payments/${paymentId}`);
+      fetchCustomerDetails();
+    } catch (err) {
+      alert(err.message || 'Failed to delete payment.');
+    }
+  };
+
+  const handleDeleteTicket = async (ticketId, ticketNo) => {
+    if (!window.confirm(`Are you sure you want to permanently delete ticket ${ticketNo || ''}?`)) return;
+    try {
+      await api.delete(`/tickets/${ticketId}`);
+      fetchCustomerDetails();
+    } catch (err) {
+      alert(err.message || 'Failed to delete ticket.');
+    }
+  };
+
   if (loading || !customer) {
     return (
       <div className="p-12 text-center text-xs text-slate-400">
@@ -383,6 +403,15 @@ export default function CustomerDetail() {
                           >
                             <Smartphone className="w-3.5 h-3.5" /> WhatsApp
                           </button>
+                          {hasPermission('payment_void') && (
+                            <button
+                              onClick={() => handleDeletePayment(p.id, p.receipt_number)}
+                              className="inline-flex items-center gap-1 p-1 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-semibold"
+                              title="Delete Payment Record"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -416,7 +445,18 @@ export default function CustomerDetail() {
                       <Badge>{t.status}</Badge>
                       <Badge variant="default">{t.category}</Badge>
                     </div>
-                    <span className="text-slate-400 text-[11px]">{new Date(t.created_at).toLocaleString()}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400 text-[11px]">{new Date(t.created_at).toLocaleString()}</span>
+                      {hasPermission('helpdesk_view') && (
+                        <button
+                          onClick={() => handleDeleteTicket(t.id, t.ticket_number)}
+                          className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                          title="Delete Ticket"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <p className="text-slate-800 font-medium">{t.description}</p>

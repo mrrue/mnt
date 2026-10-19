@@ -309,4 +309,45 @@ router.post('/:id/void', authenticateToken, requirePermission('payment_void'), (
   }
 });
 
+// DELETE /api/payments/:id - Hard delete payment and readjust customer balance
+router.delete('/:id', authenticateToken, (req, res) => {
+  try {
+    const isAllowed = req.user.role === 'admin' || req.user.role === 'manager' || (req.user.permissions && req.user.permissions.includes('payment_void'));
+    if (!isAllowed) {
+      return res.status(403).json({ error: 'Access denied. You do not have permission to delete payments.' });
+    }
+
+    const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(req.params.id);
+    if (!payment) {
+      return res.status(404).json({ error: 'Payment record not found.' });
+    }
+
+    const deleteTx = db.transaction(() => {
+      // If payment was not already voided, restore customer balance
+      if (!payment.is_voided) {
+        db.prepare(`
+          UPDATE customers
+          SET balance = balance + ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(payment.amount, payment.customer_id);
+      }
+
+      db.prepare('DELETE FROM payments WHERE id = ?').run(payment.id);
+    });
+
+    deleteTx();
+
+    logAudit(req.user.id, req.user.full_name, 'PAYMENT_DELETE', 'payments', payment.id, {
+      receipt_number: payment.receipt_number,
+      customer_id: payment.customer_id,
+      amount: payment.amount
+    }, req.ip);
+
+    res.json({ message: 'Payment record deleted and customer balance adjusted.' });
+  } catch (err) {
+    console.error('Delete payment error:', err);
+    res.status(500).json({ error: 'Failed to delete payment.' });
+  }
+});
+
 module.exports = router;

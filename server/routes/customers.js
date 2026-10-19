@@ -1,7 +1,10 @@
 const express = require('express');
 const router = express.Router();
+const fs = require('fs');
+const xlsx = require('xlsx');
 const { db } = require('../db');
 const { authenticateToken, requirePermission, logAudit } = require('../middleware/auth');
+const upload = require('../middleware/upload');
 
 // GET /api/customers - List customers with filtering, search, and pagination
 router.get('/', authenticateToken, (req, res) => {
@@ -124,6 +127,196 @@ router.get('/stats', authenticateToken, (req, res) => {
   } catch (err) {
     console.error('Customer stats error:', err);
     res.status(500).json({ error: 'Failed to fetch customer stats.' });
+  }
+});
+
+// GET /api/customers/import-template - Download sample Excel template for bulk import
+router.get('/import-template', (req, res) => {
+  try {
+    const templateData = [
+      {
+        'Name': 'Muhammad Ali',
+        'Phone': '03001234567',
+        'Alt Phone': '03219876543',
+        'CNIC': '35201-1234567-1',
+        'Area': 'Gulberg Block A',
+        'Address': 'House 14, Street 2',
+        'Package': 'Fiber 20 Mbps',
+        'Monthly Price': 2500,
+        'Due Date': 10,
+        'Status': 'Active',
+        'Balance': 0,
+        'Notes': 'Standard fiber connection'
+      },
+      {
+        'Name': 'Sara Ahmed',
+        'Phone': '03335558888',
+        'Alt Phone': '',
+        'CNIC': '35202-9876543-2',
+        'Area': 'Model Town C',
+        'Address': 'Flat 302, Green Heights',
+        'Package': 'Fiber 10 Mbps',
+        'Monthly Price': 1800,
+        'Due Date': 15,
+        'Status': 'Active',
+        'Balance': 0,
+        'Notes': ''
+      }
+    ];
+
+    const worksheet = xlsx.utils.json_to_sheet(templateData);
+    const workbook = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'Customers');
+
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Disposition', 'attachment; filename="customers_bulk_template.xlsx"');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buffer);
+  } catch (err) {
+    console.error('Template download error:', err);
+    res.status(500).json({ error: 'Failed to generate customer template.' });
+  }
+});
+
+// POST /api/customers/import - Bulk import customers from Excel or CSV
+router.post('/import', authenticateToken, requirePermission('customer_manage'), upload.single('file'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'Please upload an Excel (.xlsx/.xls) or CSV file.' });
+  }
+
+  try {
+    const workbook = xlsx.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0];
+    const rawRows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+    // Cleanup temp file
+    try { fs.unlinkSync(req.file.path); } catch (e) {}
+
+    if (!rawRows || rawRows.length === 0) {
+      return res.status(400).json({ error: 'The uploaded file is empty or has no data rows.' });
+    }
+
+    const packages = db.prepare('SELECT id, name, price FROM packages WHERE is_active = 1').all();
+    const defaultPackage = packages[0] || { id: null, price: 0 };
+
+    const lastCust = db.prepare('SELECT id FROM customers ORDER BY id DESC LIMIT 1').get();
+    let currentIdSeq = lastCust ? lastCust.id : 1000;
+
+    const today = new Date().toISOString().split('T')[0];
+    const errors = [];
+    let importedCount = 0;
+
+    const importTx = db.transaction(() => {
+      rawRows.forEach((row, idx) => {
+        const rowNum = idx + 2; // +1 for 0-index, +1 for header
+        // Flexible key matching
+        const findVal = (keys) => {
+          for (const k of Object.keys(row)) {
+            const cleanK = k.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+            for (const target of keys) {
+              if (cleanK === target.toLowerCase().replace(/[^a-z0-9]/g, '')) {
+                return row[k];
+              }
+            }
+          }
+          return undefined;
+        };
+
+        const name = findVal(['name', 'customername', 'fullname', 'clientname']);
+        const phone = findVal(['phone', 'phonenumber', 'mobile', 'contact', 'cell']);
+        const altPhone = findVal(['altphone', 'alternatephone', 'secondaryphone']) || null;
+        const cnic = findVal(['cnic', 'idcard', 'nic']) || null;
+        const address = findVal(['address', 'street', 'location']) || 'Pending Address';
+        const area = findVal(['area', 'sector', 'zone', 'city']) || 'Main Area';
+        const pkgName = findVal(['package', 'packagename', 'plan', 'speed']);
+        const priceVal = findVal(['monthlyprice', 'price', 'rate', 'fee', 'amount']);
+        const dueDateVal = findVal(['duedate', 'billingday', 'due']);
+        const statusVal = findVal(['status']) || 'Active';
+        const balanceVal = findVal(['balance', 'dues', 'arrears', 'outstanding']) || 0;
+        const notes = findVal(['notes', 'remarks', 'comment']) || 'Bulk Imported';
+
+        if (!name || !phone) {
+          errors.push(`Row ${rowNum}: Skipped because Name or Phone is missing.`);
+          return;
+        }
+
+        // Match package
+        let matchedPkg = defaultPackage;
+        if (pkgName) {
+          const found = packages.find(p => p.name.toLowerCase().includes(String(pkgName).trim().toLowerCase()));
+          if (found) matchedPkg = found;
+        }
+
+        const finalPrice = priceVal !== undefined && priceVal !== '' && !isNaN(priceVal)
+          ? parseFloat(priceVal)
+          : (matchedPkg.price || 0);
+
+        currentIdSeq += 1;
+        const customer_code = `CUST-${String(currentIdSeq).padStart(4, '0')}`;
+
+        const insertStmt = db.prepare(`
+          INSERT INTO customers (
+            customer_code, name, cnic, phone, alt_phone, email, address, area,
+            package_id, monthly_price, installation_date, subscription_start_date,
+            billing_cycle, due_date, status, connection_status, balance, notes
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        const result = insertStmt.run(
+          customer_code,
+          String(name).trim(),
+          cnic ? String(cnic).trim() : null,
+          String(phone).trim(),
+          altPhone ? String(altPhone).trim() : null,
+          null,
+          String(address).trim(),
+          String(area).trim(),
+          matchedPkg.id,
+          finalPrice,
+          today,
+          today,
+          'monthly',
+          parseInt(dueDateVal) || 10,
+          statusVal,
+          'Connected',
+          parseFloat(balanceVal) || 0,
+          String(notes).trim()
+        );
+
+        const newCustId = result.lastInsertRowid;
+
+        // Create initial subscription if package exists
+        if (matchedPkg.id) {
+          db.prepare(`
+            INSERT INTO subscriptions (customer_id, package_id, start_date, amount, final_amount, status, notes)
+            VALUES (?, ?, ?, ?, ?, 'Active', 'Bulk Excel Import')
+          `).run(newCustId, matchedPkg.id, today, finalPrice, finalPrice);
+        }
+
+        importedCount++;
+      });
+    });
+
+    importTx();
+
+    logAudit(req.user.id, req.user.full_name, 'CUSTOMER_BULK_IMPORT', 'customers', null, {
+      totalRows: rawRows.length,
+      importedCount,
+      errorsCount: errors.length
+    }, req.ip);
+
+    res.json({
+      message: `Successfully imported ${importedCount} customers.`,
+      importedCount,
+      totalRows: rawRows.length,
+      errors
+    });
+  } catch (err) {
+    console.error('Bulk import error:', err);
+    try { if (req.file) fs.unlinkSync(req.file.path); } catch (e) {}
+    res.status(500).json({ error: err.message || 'Failed to process Excel file.' });
   }
 });
 

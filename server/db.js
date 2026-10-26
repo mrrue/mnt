@@ -332,8 +332,19 @@ function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_expenses_class ON expenses(classification);
     CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(date);
     CREATE INDEX IF NOT EXISTS idx_attendance_emp_date ON attendance(employee_id, date);
-    CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);
   `);
+
+  // Migrations for payments table to track balance progression
+  try {
+    db.prepare('ALTER TABLE payments ADD COLUMN previous_balance REAL DEFAULT 0').run();
+  } catch (e) {
+    // Column already exists
+  }
+  try {
+    db.prepare('ALTER TABLE payments ADD COLUMN remaining_balance REAL DEFAULT 0').run();
+  } catch (e) {
+    // Column already exists
+  }
 }
 
 initDatabase();

@@ -216,15 +216,18 @@ router.post('/', authenticateToken, requirePermission('payment_create'), (req, r
     const receipt_number = `REC-${dateStr}-${randomSuffix}`;
 
     const numAmount = parseFloat(amount);
+    const prevBalance = cust.balance || 0;
+    const newBalance = Math.max(prevBalance - numAmount, 0);
 
     // Insert payment in transaction
     const insertPayment = db.transaction(() => {
       const stmt = db.prepare(`
         INSERT INTO payments (
           receipt_number, customer_id, amount, payment_method,
-          payment_date, billing_period, reference_number, notes, created_by
+          payment_date, billing_period, reference_number, notes,
+          previous_balance, remaining_balance, created_by
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       const result = stmt.run(
@@ -236,11 +239,12 @@ router.post('/', authenticateToken, requirePermission('payment_create'), (req, r
         billing_period || new Date().toLocaleString('default', { month: 'long', year: 'numeric' }),
         reference_number || null,
         notes || null,
+        prevBalance,
+        newBalance,
         req.user.id
       );
 
       // Update customer balance (reduce overdue balance)
-      const newBalance = Math.max(cust.balance - numAmount, 0);
       db.prepare(`
         UPDATE customers
         SET balance = ?, updated_at = CURRENT_TIMESTAMP

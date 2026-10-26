@@ -358,11 +358,11 @@ export default function TicketsList() {
                         >
                           <Eye className="w-3.5 h-3.5" /> View
                         </Link>
-                        {hasPermission('helpdesk_view') && (
+                        {(user?.role === 'admin' || user?.role === 'manager' || hasPermission('helpdesk_manage')) && (
                           <button
                             onClick={() => handleDeleteTicket(t.id, t.ticket_number)}
                             className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg border border-rose-200 transition-colors"
-                            title="Delete Ticket"
+                            title="Delete Ticket (Manager/Admin Only)"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>

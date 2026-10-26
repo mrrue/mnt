@@ -16,7 +16,8 @@ import {
   FileSpreadsheet,
   Upload,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Trash2
 } from 'lucide-react';
 import Badge from '../../components/common/Badge';
 import Modal from '../../components/common/Modal';
@@ -51,21 +52,23 @@ export default function CustomersList() {
   const [selectedCustomerForPay, setSelectedCustomerForPay] = useState(null);
   const [receiptModalData, setReceiptModalData] = useState(null);
 
-  // New Customer Form State
+  // New Customer Form State (Simplified for rapid manual customer entry)
   const [formData, setFormData] = useState({
     name: '',
+    customer_code: '',
     cnic: '',
     phone: '',
     alt_phone: '',
     email: '',
     address: '',
-    area: '',
+    area: 'Main Area',
     package_id: '',
     monthly_price: '',
     installation_date: new Date().toISOString().split('T')[0],
     billing_cycle: 'monthly',
     due_date: '10',
     status: 'Active',
+    balance: '',
     notes: ''
   });
 
@@ -128,23 +131,37 @@ export default function CustomersList() {
       setIsAddModalOpen(false);
       setFormData({
         name: '',
+        customer_code: '',
         cnic: '',
         phone: '',
         alt_phone: '',
         email: '',
         address: '',
-        area: '',
+        area: 'Main Area',
         package_id: packages[0]?.id || '',
         monthly_price: packages[0]?.price || '',
         installation_date: new Date().toISOString().split('T')[0],
         billing_cycle: 'monthly',
         due_date: '10',
         status: 'Active',
+        balance: '',
         notes: ''
       });
       fetchCustomers(1);
     } catch (err) {
       alert(err.message || 'Failed to create customer.');
+    }
+  };
+
+  const handleDeleteCustomer = async (customerId, customerName, customerCode) => {
+    if (!window.confirm(`Are you sure you want to delete customer "${customerName}" (${customerCode})? This will remove them from the directory.`)) {
+      return;
+    }
+    try {
+      await api.delete(`/customers/${customerId}`);
+      fetchCustomers(pagination.page);
+    } catch (err) {
+      alert(err.message || 'Failed to delete customer.');
     }
   };
 
@@ -407,6 +424,15 @@ export default function CustomersList() {
                         >
                           <Eye className="w-3.5 h-3.5" />
                         </Link>
+                        {hasPermission('customer_manage') && (
+                          <button
+                            onClick={() => handleDeleteCustomer(c.id, c.name, c.customer_code)}
+                            className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg border border-rose-200 transition-colors"
+                            title="Delete Customer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -422,17 +448,17 @@ export default function CustomersList() {
         />
       </div>
 
-      {/* ADD CUSTOMER MODAL */}
+      {/* ADD CUSTOMER MODAL - Streamlined for Rapid Data Entry */}
       <Modal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
-        title="Add New Customer"
-        maxWidth="max-w-2xl"
+        title="Add Customer Record"
+        maxWidth="max-w-lg"
       >
         <form onSubmit={handleCreateCustomer} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Full Name *</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Customer Name *</label>
               <input
                 type="text"
                 required
@@ -442,123 +468,70 @@ export default function CustomersList() {
                 placeholder="e.g. Muhammad Usman"
               />
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">CNIC / ID (Optional)</label>
-              <input
-                type="text"
-                value={formData.cnic}
-                onChange={(e) => setFormData({ ...formData, cnic: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-sky-500"
-                placeholder="42201-XXXXXXX-X"
-              />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Customer ID (Optional)</label>
+                <input
+                  type="text"
+                  value={formData.customer_code}
+                  onChange={(e) => setFormData({ ...formData, customer_code: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                  placeholder="Leave empty to auto-generate"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">CNIC / ID (Optional)</label>
+                <input
+                  type="text"
+                  value={formData.cnic}
+                  onChange={(e) => setFormData({ ...formData, cnic: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                  placeholder="e.g. 42201-1234567-1"
+                />
+              </div>
             </div>
+
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Phone Number *</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Phone Number (Optional)</label>
               <input
                 type="text"
-                required
                 value={formData.phone}
                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-sky-500"
                 placeholder="+92 300 1234567"
               />
             </div>
+
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Alternate Phone</label>
-              <input
-                type="text"
-                value={formData.alt_phone}
-                onChange={(e) => setFormData({ ...formData, alt_phone: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-sky-500"
-                placeholder="+92 321 7654321"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Area / Sector *</label>
-              <input
-                type="text"
-                required
-                value={formData.area}
-                onChange={(e) => setFormData({ ...formData, area: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-sky-500"
-                placeholder="e.g. Block 6, PECHS"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Installation Address *</label>
-              <input
-                type="text"
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Address *</label>
+              <textarea
+                rows="2"
                 required
                 value={formData.address}
                 onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-sky-500"
-                placeholder="House / Flat / Street address"
+                placeholder="House / Flat / Street address, Area"
               />
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">ISP Package *</label>
-              <select
-                required
-                value={formData.package_id}
-                onChange={(e) => {
-                  const selPkg = packages.find(p => p.id === parseInt(e.target.value));
-                  setFormData({
-                    ...formData,
-                    package_id: e.target.value,
-                    monthly_price: selPkg ? selPkg.price : formData.monthly_price
-                  });
-                }}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-sky-500"
-              >
-                {packages.map(p => (
-                  <option key={p.id} value={p.id}>{p.name} - {p.speed} ({formatCurrency(p.price)})</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Monthly Price ({formatCurrency(formData.monthly_price)})</label>
-              <input
-                type="number"
-                required
-                value={formData.monthly_price}
-                onChange={(e) => setFormData({ ...formData, monthly_price: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-sky-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Due Date (Day of Month)</label>
-              <input
-                type="number"
-                min="1"
-                max="28"
-                value={formData.due_date}
-                onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-sky-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Account Status</label>
-              <select
-                value={formData.status}
-                onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-sky-500"
-              >
-                <option value="Active">Active</option>
-                <option value="Suspended">Suspended</option>
-                <option value="Pending">Pending</option>
-              </select>
-            </div>
-          </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Notes</label>
-            <textarea
-              rows="2"
-              value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-sky-500"
-              placeholder="e.g. Router ONU serial number, port number, etc."
-            />
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
+              <label className="block text-xs font-bold text-amber-900 mb-1">Previous / Remainder Balance (Dues)</label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="any"
+                  value={formData.balance}
+                  onChange={(e) => setFormData({ ...formData, balance: e.target.value })}
+                  className="w-full px-3 py-2 bg-white border border-amber-300 rounded-lg text-sm font-bold text-amber-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="0 (e.g. 3500 for old unpaid arrears)"
+                />
+              </div>
+              <p className="text-[11px] text-amber-700 mt-1">
+                Enter any historical dues. This balance will show on payments and receipts until cleared.
+              </p>
+            </div>
           </div>
 
           <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">

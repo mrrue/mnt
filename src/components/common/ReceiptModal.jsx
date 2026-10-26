@@ -41,7 +41,9 @@ export default function ReceiptModal({ isOpen, onClose, receiptData }) {
       return;
     }
 
-    const bizName = biz.name || 'ISP NETWORK';
+    const prevBal = payment.previous_balance !== undefined ? payment.previous_balance : ((payment.current_balance || 0) + (payment.amount || 0));
+    const remBal = payment.remaining_balance !== undefined ? payment.remaining_balance : (payment.current_balance || 0);
+
     const message = 
 `🧾 *${bizName.toUpperCase()} - PAYMENT RECEIPT*
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -49,12 +51,11 @@ export default function ReceiptModal({ isOpen, onClose, receiptData }) {
 🆔 *Customer ID:* ${payment.customer_code || 'N/A'}
 🔢 *Receipt No:* ${payment.receipt_number}
 📅 *Date:* ${payment.payment_date || ''}
-🌐 *Package:* ${payment.package_name || 'Broadband Plan'}
-🗓️ *Billing Period:* ${payment.billing_period || 'Current Month'}
+${payment.package_name ? `🌐 *Package:* ${payment.package_name}\n` : ''}🗓️ *Billing Period:* ${payment.billing_period || 'Current Month'}
 💳 *Payment Mode:* ${payment.payment_method || 'Cash'}
 ${payment.reference_number ? `🔖 *Ref/Tx ID:* ${payment.reference_number}\n` : ''}━━━━━━━━━━━━━━━━━━━━━━
-💰 *PAID AMOUNT: ${formatCurrency(payment.amount)}*
-${payment.current_balance > 0 ? `⚠️ *Remaining Balance:* ${formatCurrency(payment.current_balance)}\n` : '✅ *Account Status:* Paid / Cleared\n'}━━━━━━━━━━━━━━━━━━━━━━
+${prevBal > 0 ? `⏮️ *Previous Balance / Dues:* ${formatCurrency(prevBal)}\n` : ''}💰 *PAID AMOUNT: ${formatCurrency(payment.amount)}*
+${remBal > 0 ? `⚠️ *Remaining Balance (Dues):* ${formatCurrency(remBal)}\n` : '✅ *Remaining Balance:* Cleared (Rs. 0)\n'}━━━━━━━━━━━━━━━━━━━━━━
 ${payment.collector_name ? `👨‍💼 *Received by:* ${payment.collector_name}\n` : ''}${biz.phone ? `📞 *Helpline:* ${biz.phone}\n` : ''}Thank you for your valued business!`;
 
     const encodedMsg = encodeURIComponent(message);
@@ -131,11 +132,27 @@ ${payment.collector_name ? `👨‍💼 *Received by:* ${payment.collector_name}
     doc.line(margin, y, rightX, y);
     y += 5;
 
+    const prevBal = payment.previous_balance !== undefined ? payment.previous_balance : ((payment.current_balance || 0) + (payment.amount || 0));
+    const remBal = payment.remaining_balance !== undefined ? payment.remaining_balance : (payment.current_balance || 0);
+
+    if (prevBal > 0) {
+      doc.setFont('courier', 'normal');
+      doc.text('PREVIOUS BALANCE:', margin, y);
+      doc.text(formatCurrency(prevBal), rightX, y, { align: 'right' });
+      y += 4.5;
+    }
+
     doc.setFont('courier', 'bold');
     doc.setFontSize(10);
     doc.text('AMOUNT PAID:', margin, y);
     doc.text(formatCurrency(payment.amount), rightX, y, { align: 'right' });
-    y += 6;
+    y += 5.5;
+
+    doc.setFont('courier', 'bold');
+    doc.setFontSize(8.5);
+    doc.text('REMAINING BALANCE:', margin, y);
+    doc.text(formatCurrency(remBal), rightX, y, { align: 'right' });
+    y += 5.5;
 
     if (rCfg.show_collector && payment.collector_name) {
       doc.setFont('courier', 'normal');
@@ -283,18 +300,31 @@ ${payment.collector_name ? `👨‍💼 *Received by:* ${payment.collector_name}
             )}
           </div>
 
-          {/* Amount Box */}
-          <div className="py-2.5 my-1 border-b-2 border-dashed border-slate-900 flex justify-between items-center text-sm font-bold">
-            <span>PAID AMOUNT:</span>
-            <span className="text-base">{formatCurrency(payment.amount)}</span>
-          </div>
-
-          {payment.current_balance > 0 && (
-            <div className="py-1 text-[11px] flex justify-between text-rose-600 font-bold border-b border-dashed border-slate-400">
-              <span>Remaining Balance:</span>
-              <span>{formatCurrency(payment.current_balance)}</span>
-            </div>
-          )}
+          {/* Balance & Amount Breakdown */}
+          {(() => {
+            const prevBal = payment.previous_balance !== undefined ? payment.previous_balance : ((payment.current_balance || 0) + (payment.amount || 0));
+            const remBal = payment.remaining_balance !== undefined ? payment.remaining_balance : (payment.current_balance || 0);
+            return (
+              <div className="py-2 border-b-2 border-dashed border-slate-900 space-y-1">
+                {prevBal > 0 && (
+                  <div className="flex justify-between text-[11px] text-slate-700">
+                    <span className="font-medium">Previous Balance (Dues):</span>
+                    <span className="font-semibold">{formatCurrency(prevBal)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center text-sm font-bold text-slate-900 pt-0.5">
+                  <span>PAID AMOUNT:</span>
+                  <span className="text-base text-emerald-700">{formatCurrency(payment.amount)}</span>
+                </div>
+                <div className="flex justify-between text-[11px] pt-1 border-t border-dashed border-slate-300">
+                  <span className="font-bold text-slate-700">Remaining Balance:</span>
+                  <span className={`font-bold ${remBal > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                    {remBal > 0 ? formatCurrency(remBal) : 'Cleared (Rs. 0)'}
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
 
           {rCfg.show_collector && (
             <div className="py-1.5 text-[10px] text-slate-600">

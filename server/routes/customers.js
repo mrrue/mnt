@@ -400,6 +400,7 @@ router.get('/:id', authenticateToken, (req, res) => {
 router.post('/', authenticateToken, requirePermission('customer_manage'), (req, res) => {
   try {
     const {
+      customer_code: customCustomerCode,
       name,
       cnic,
       phone,
@@ -415,30 +416,41 @@ router.post('/', authenticateToken, requirePermission('customer_manage'), (req, 
       due_date,
       status,
       connection_status,
+      balance,
       notes
     } = req.body;
 
-    if (!name || !phone || !address || !area || !package_id) {
-      return res.status(400).json({ error: 'Name, phone, address, area, and package are required.' });
+    if (!name || !address) {
+      return res.status(400).json({ error: 'Name and address are required.' });
     }
 
-    // Auto-generate customer ID if not provided, e.g. CUST-1001
-    const lastCust = db.prepare('SELECT id FROM customers ORDER BY id DESC LIMIT 1').get();
-    const nextId = lastCust ? lastCust.id + 1 : 1001;
-    const customer_code = `CUST-${String(nextId).padStart(4, '0')}`;
+    // Auto-generate or format custom customer ID, e.g. CUST-1001
+    let customer_code = customCustomerCode ? customCustomerCode.trim() : '';
+    if (!customer_code) {
+      const lastCust = db.prepare('SELECT id FROM customers ORDER BY id DESC LIMIT 1').get();
+      const nextId = lastCust ? lastCust.id + 1 : 1001;
+      customer_code = `CUST-${String(nextId).padStart(4, '0')}`;
+    }
+
+    // Find default package if not provided
+    const packages = db.prepare('SELECT id, name, price FROM packages WHERE is_active = 1').all();
+    const defaultPackage = packages[0] || { id: null, price: 0 };
+    const finalPackageId = package_id || defaultPackage.id;
 
     // Get package details for price if not custom
     let finalPrice = monthly_price;
-    const pkg = db.prepare('SELECT * FROM packages WHERE id = ?').get(package_id);
-    if (!pkg) {
-      return res.status(400).json({ error: 'Selected package does not exist.' });
-    }
-    if (finalPrice === undefined || finalPrice === null || finalPrice === '') {
-      finalPrice = pkg.price;
+    if (finalPackageId) {
+      const pkg = db.prepare('SELECT * FROM packages WHERE id = ?').get(finalPackageId);
+      if (finalPrice === undefined || finalPrice === null || finalPrice === '') {
+        finalPrice = pkg ? pkg.price : 0;
+      }
+    } else {
+      finalPrice = finalPrice || 0;
     }
 
     const today = new Date().toISOString().split('T')[0];
     const subStart = subscription_start_date || today;
+    const initialBalance = balance !== undefined && balance !== null && balance !== '' ? parseFloat(balance) : 0;
 
     const insertStmt = db.prepare(`
       INSERT INTO customers (
@@ -452,21 +464,21 @@ router.post('/', authenticateToken, requirePermission('customer_manage'), (req, 
     const result = insertStmt.run(
       customer_code,
       name.trim(),
-      cnic || null,
-      phone.trim(),
-      alt_phone || null,
-      email || null,
+      cnic ? cnic.trim() : null,
+      phone ? phone.trim() : '',
+      alt_phone ? alt_phone.trim() : null,
+      email ? email.trim() : null,
       address.trim(),
-      area.trim(),
-      package_id,
-      parseFloat(finalPrice),
+      (area || 'Main Area').trim(),
+      finalPackageId,
+      parseFloat(finalPrice) || 0,
       installation_date || today,
       subStart,
       billing_cycle || 'monthly',
       parseInt(due_date) || 10,
       status || 'Active',
       connection_status || 'Connected',
-      0,
+      initialBalance,
       notes || null
     );
 

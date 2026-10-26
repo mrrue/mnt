@@ -45,6 +45,7 @@ export default function TicketDetail() {
   const [newMessage, setNewMessage] = useState('');
   const [chatFile, setChatFile] = useState(null);
   const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
   const chatBottomRef = useRef(null);
 
   // Voice Note Recording State
@@ -74,8 +75,8 @@ export default function TicketDetail() {
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const photoInputRef = useRef(null);
 
-  const fetchTicketDetails = async () => {
-    setLoading(true);
+  const fetchTicketDetails = async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     try {
       const res = await api.get(`/tickets/${id}`);
       setTicket(res.ticket);
@@ -98,7 +99,7 @@ export default function TicketDetail() {
       alert('Failed to load ticket.');
       navigate('/helpdesk/tickets');
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   };
 
@@ -126,8 +127,11 @@ export default function TicketDetail() {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'new_ticket_message' && msg.ticket_id === ticket.id) {
-          setMessages(prev => [...prev, msg]);
-          scrollToBottom();
+          // If message is from other user, append it
+          if (msg.sender_id !== user.id) {
+            setMessages(prev => [...prev, msg]);
+            scrollToBottom();
+          }
         }
       } catch (e) {}
     };
@@ -159,6 +163,19 @@ export default function TicketDetail() {
 
       const res = await api.post(`/tickets/${id}/messages`, formData);
 
+      // Optimistically append message immediately to prevent needing a full page reload
+      const newMsgObj = {
+        id: res.id,
+        ticket_id: ticket.id,
+        sender_id: user.id,
+        sender_name: user.full_name || 'Me',
+        message: newMessage.trim(),
+        attachment_url: res.attachment_url,
+        attachment_name: chatFile?.name || null,
+        created_at: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, newMsgObj]);
+
       // Broadcast to socket room
       sendWebSocketMessage({
         type: 'ticket_message',
@@ -170,7 +187,9 @@ export default function TicketDetail() {
 
       setNewMessage('');
       setChatFile(null);
-      fetchTicketDetails();
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (cameraInputRef.current) cameraInputRef.current.value = '';
+      fetchTicketDetails(false);
       scrollToBottom();
     } catch (err) {
       alert('Failed to send message.');
@@ -294,6 +313,19 @@ export default function TicketDetail() {
 
         const res = await api.post(`/tickets/${id}/messages`, formData);
 
+        // Optimistically append voice note to messages immediately
+        const voiceMsgObj = {
+          id: res.id,
+          ticket_id: ticket.id,
+          sender_id: user.id,
+          sender_name: user.full_name || 'Me',
+          message: '🎤 Voice Message',
+          attachment_url: res.attachment_url,
+          attachment_name: audioFile.name,
+          created_at: new Date().toISOString()
+        };
+        setMessages(prev => [...prev, voiceMsgObj]);
+
         sendWebSocketMessage({
           type: 'ticket_message',
           ticket_id: ticket.id,
@@ -302,7 +334,7 @@ export default function TicketDetail() {
           attachment_name: audioFile.name
         });
 
-        fetchTicketDetails();
+        fetchTicketDetails(false);
         scrollToBottom();
       } catch (err) {
         alert('Failed to send voice message.');
@@ -346,11 +378,11 @@ export default function TicketDetail() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {hasPermission('helpdesk_view') && (
+          {(user?.role === 'admin' || user?.role === 'manager' || hasPermission('helpdesk_manage')) && (
             <button
               onClick={handleDeleteTicket}
               className="inline-flex items-center gap-1.5 px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-semibold rounded-xl border border-rose-200 transition-colors"
-              title="Delete this ticket"
+              title="Delete this ticket (Manager/Admin Only)"
             >
               <Trash2 className="w-3.5 h-3.5" /> Delete Ticket
             </button>
@@ -608,41 +640,78 @@ export default function TicketDetail() {
                   </div>
                 </div>
               ) : (
-                <form onSubmit={handleSendMessage} className="flex items-center gap-2">
-                  <label className="p-2 text-slate-400 hover:text-slate-600 cursor-pointer rounded-lg hover:bg-slate-100" title="Attach file or photo">
-                    <Paperclip className="w-4 h-4" />
+                <div className="space-y-2">
+                  {chatFile && (
+                    <div className="flex items-center justify-between px-3 py-1.5 bg-sky-50 border border-sky-200 rounded-xl text-xs text-sky-800">
+                      <span className="truncate max-w-[250px] font-medium flex items-center gap-1.5">
+                        <Paperclip className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                        {chatFile.name}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setChatFile(null);
+                          if (fileInputRef.current) fileInputRef.current.value = '';
+                          if (cameraInputRef.current) cameraInputRef.current.value = '';
+                        }}
+                        className="text-xs font-bold text-sky-600 hover:text-rose-600 ml-2"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+                    {/* Document / File Attachment */}
+                    <label className="p-2 text-slate-400 hover:text-slate-600 cursor-pointer rounded-lg hover:bg-slate-100 transition-colors" title="Attach file or document">
+                      <Paperclip className="w-4 h-4" />
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={(e) => setChatFile(e.target.files[0] || null)}
+                        className="hidden"
+                      />
+                    </label>
+
+                    {/* Camera Photo Snap */}
+                    <label className="p-2 text-slate-400 hover:text-sky-600 cursor-pointer rounded-lg hover:bg-sky-50 transition-colors" title="Take photo with camera">
+                      <Camera className="w-4 h-4" />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        ref={cameraInputRef}
+                        onChange={(e) => setChatFile(e.target.files[0] || null)}
+                        className="hidden"
+                      />
+                    </label>
+
+                    {/* Voice Note Recording */}
+                    <button
+                      type="button"
+                      onClick={startRecording}
+                      className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                      title="Record voice message"
+                    >
+                      <Mic className="w-4 h-4" />
+                    </button>
+
                     <input
-                      type="file"
-                      ref={fileInputRef}
-                      onChange={(e) => setChatFile(e.target.files[0] || null)}
-                      className="hidden"
+                      type="text"
+                      value={newMessage}
+                      onChange={(e) => setNewMessage(e.target.value)}
+                      placeholder={chatFile ? `File attached: ${chatFile.name}` : "Type message or record voice note..."}
+                      className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500"
                     />
-                  </label>
 
-                  <button
-                    type="button"
-                    onClick={startRecording}
-                    className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                    title="Record voice message"
-                  >
-                    <Mic className="w-4 h-4" />
-                  </button>
-
-                  <input
-                    type="text"
-                    value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                    placeholder={chatFile ? `File attached: ${chatFile.name}` : "Type message or record voice note..."}
-                    className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-                  />
-
-                  <button
-                    type="submit"
-                    className="p-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl shadow-xs transition-colors"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
-                </form>
+                    <button
+                      type="submit"
+                      className="p-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl shadow-xs transition-colors"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </form>
+                </div>
               )}
             </div>
           </div>

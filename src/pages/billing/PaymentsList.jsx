@@ -270,7 +270,8 @@ export default function PaymentsList() {
                 <th className="py-3 px-4">Billing Period</th>
                 <th className="py-3 px-4">Mode / Ref</th>
                 <th className="py-3 px-4">Date</th>
-                <th className="py-3 px-4">Amount</th>
+                <th className="py-3 px-4">Paid Amount</th>
+                <th className="py-3 px-4">Rem. Balance</th>
                 <th className="py-3 px-4">Collected By</th>
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
@@ -278,11 +279,11 @@ export default function PaymentsList() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan="8" className="text-center py-10 text-slate-400">Loading payment records...</td>
+                  <td colSpan="9" className="text-center py-10 text-slate-400">Loading payment records...</td>
                 </tr>
               ) : payments.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="text-center py-10 text-slate-400">No payment records found.</td>
+                  <td colSpan="9" className="text-center py-10 text-slate-400">No payment records found.</td>
                 </tr>
               ) : (
                 payments.map(p => (
@@ -310,6 +311,17 @@ export default function PaymentsList() {
                       <span className={`font-bold text-sm ${p.is_voided ? 'text-slate-400' : 'text-emerald-600'}`}>
                         {formatCurrency(p.amount)}
                       </span>
+                    </td>
+                    <td className="py-3.5 px-4">
+                      {(p.remaining_balance !== undefined && p.remaining_balance !== null) ? (
+                        p.remaining_balance > 0 ? (
+                          <span className="font-bold text-rose-600">{formatCurrency(p.remaining_balance)}</span>
+                        ) : (
+                          <span className="font-medium text-emerald-600">Cleared (0)</span>
+                        )
+                      ) : (
+                        <span className="text-slate-400">-</span>
+                      )}
                     </td>
                     <td className="py-3.5 px-4 text-slate-600">
                       {p.created_by_name || 'Staff'}

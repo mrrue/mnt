@@ -516,6 +516,30 @@ export default function CustomersList() {
               />
             </div>
 
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Internet Package *</label>
+              <select
+                required
+                value={formData.package_id}
+                onChange={(e) => {
+                  const selPkg = packages.find(p => p.id === parseInt(e.target.value));
+                  setFormData({
+                    ...formData,
+                    package_id: e.target.value,
+                    monthly_price: selPkg ? selPkg.price : formData.monthly_price
+                  });
+                }}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:ring-2 focus:ring-sky-500 font-medium"
+              >
+                <option value="">-- Select Package --</option>
+                {packages.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.speed || 'Broadband'}) - {formatCurrency(p.price)}/mo
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
               <label className="block text-xs font-bold text-amber-900 mb-1">Previous / Remainder Balance (Dues)</label>
               <div className="relative">
